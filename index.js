@@ -1,18 +1,39 @@
 const express = require('express');
 const app = express();
-require('dotenv').config()
+require('dotenv').config();
 const port = process.env.PORT || 5000;
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // Middleware
 app.use(cors());
-
 app.use(express.json());
 
+const logger = (req, res, next) => {
+    console.log('Logging Information');
+    next();
+}
+// For cheacking authorization
+const verifyFBToken = (req, res, next) => {
+    console.log("Verify Middle Ware", req.headers.authorization);
 
-const uri = `mongodb://${process.env.DB_USER}:${process.env.DB_PASS}@ac-k50mwtj-shard-00-00.4j5c4iq.mongodb.net:27017,ac-k50mwtj-shard-00-01.4j5c4iq.mongodb.net:27017,ac-k50mwtj-shard-00-02.4j5c4iq.mongodb.net:27017/?ssl=true&replicaSet=atlas-xqdkdv-shard-0&authSource=admin&appName=Cluster0`
+    if (!req.headers.authorization) {
 
+        // don't allow
+        return res.status(401).send(message, "Unauthorized");
+    }
+    const token = req.headers.authorization.split(' ')[1];
+    if (!token) {
+        // don't allow
+        return res.status(401).send(message, "Unauthorized");
+
+    }
+    // verify token
+
+    next();
+}
+
+const uri = `mongodb://${process.env.DB_USER}:${process.env.DB_PASS}@ac-k50mwtj-shard-00-00.4j5c4iq.mongodb.net:27017,ac-k50mwtj-shard-00-01.4j5c4iq.mongodb.net:27017,ac-k50mwtj-shard-00-02.4j5c4iq.mongodb.net:27017/?ssl=true&replicaSet=atlas-xqdkdv-shard-0&authSource=admin&appName=Cluster0`;
 
 const client = new MongoClient(uri, {
     serverApi: {
@@ -31,155 +52,139 @@ async function run() {
         const bidsCollection = db.collection('bids');
         const usersCollection = db.collection('users');
 
-        // For users API
-
+        // Users API
         app.post("/users", async (req, res) => {
             const newUsers = req.body;
-
             const email = req.body.email;
-            const query = { email: email };
+            const query = { email };
 
             const existingUser = await usersCollection.findOne(query);
+
             if (existingUser) {
-                res.send("User Already Exists");
-
-            }
-            else {
-                const result = await usersCollection.insertOne(newUsers)
-                res.send(result);
+                return res.send({ message: "User Already Exists" });
             }
 
+            const result = await usersCollection.insertOne(newUsers);
+            res.send(result);
+        });
 
-
-        })
-
-        // Products Api
-
+        // Products API
         app.get('/products', async (req, res) => {
             const email = req.query.email;
-            const query = {}
+            const query = {};
+
             if (email) {
-                query.email = email
+                query.email = email;
             }
-            const cursor = productsCollection.find(query);
-            const result = await cursor.toArray();
-            res.send(result)
-        })
+
+            const result = await productsCollection.find(query).toArray();
+            res.send(result);
+        });
+
         app.get('/latest-products', async (req, res) => {
-            const cursor = productsCollection.find().sort({ created_at: -1 }).limit(6);
+            const result = await productsCollection
+                .find()
+                .sort({ created_at: -1 })
+                .limit(6)
+                .toArray();
 
-            const result = await cursor.toArray();
-            res.send(result)
-        })
-
+            res.send(result);
+        });
 
         app.get('/products/:id', async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
 
-            const result = await productsCollection.findOne(query)
+            const result = await productsCollection.findOne(query);
             res.send(result);
-        })
-
+        });
 
         app.post("/products", async (req, res) => {
             const newProduct = req.body;
             const result = await productsCollection.insertOne(newProduct);
             res.send(result);
-        })
+        });
 
         app.delete("/products/:id", async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
             const result = await productsCollection.deleteOne(query);
             res.send(result);
-        })
+        });
 
         app.patch("/products/:id", async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
             const updateProduct = req.body;
+
             const update = {
                 $set: {
                     name: updateProduct.name,
                     price: updateProduct.price
                 }
-            }
+            };
+
             const result = await productsCollection.updateOne(query, update);
-            res.send(result)
-        })
-
-        // Bids Related Api
-
-        app.get("/bids", async (req, res) => {
-            const email = req.query.email;
-            const query = {}
-            if (email) {
-                query.buyer_email = email;
-            }
-            const cursor = bidsCollection.find(query);
-            const result = await cursor.toArray();
             res.send(result);
-        })
+        });
 
+        // Bids API
+        app.get("/bids", logger, verifyFBToken, async (req, res) => {
+            try {
+                const email = req.query.email;
+                const query = {};
 
-        app.get('/bids', async (req, res) => {
+                if (email) {
+                    query.buyer_email = email;
+                }
 
-            const query = {}
-            if (query.email) {
-                query.buyer_email = email
+                const result = await bidsCollection.find(query).toArray();
+                res.send(result);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ error: error.message });
             }
-            const cursor = bidsCollection.find(query);
-            const result = await cursor.toArray();
-            res.send(result)
-        })
-
-        // 
-
-        app.delete('bids/:id', async (req, res) => {
-            const id = req.params.id;
-
-            const query = { _id: new ObjectId(id) }
-
-            const result = await bidsCollection.deleteOne(query);
-            res.send(result)
-        })
+        });
 
         app.get('/products/bids/:productId', async (req, res) => {
             const productId = req.params.productId;
             const query = { product: productId };
 
-            const cursor = bidsCollection.find(query).sort({ bid_price: -1 })
-            const result = await cursor.toArray()
-            res.send(result)
-        })
+            const result = await bidsCollection
+                .find(query)
+                .sort({ bid_price: -1 })
+                .toArray();
+
+            res.send(result);
+        });
 
         app.post('/bids', async (req, res) => {
             const newBid = req.body;
             const result = await bidsCollection.insertOne(newBid);
             res.send(result);
-        })
+        });
 
+        app.delete('/bids/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
 
+            const result = await bidsCollection.deleteOne(query);
+            res.send(result);
+        });
 
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
-        // Ensures that the client will close when you finish/error
         // await client.close();
     }
 }
 
-
-
 run().catch(console.dir);
 
-
-
 app.get("/", (req, res) => {
-    res.send("Smart Server is Running")
-})
+    res.send("Smart Server is Running");
+});
 
 app.listen(port, () => {
-    console.log(`Smart Server Is Running On ${port}`)
-})
+    console.log(`Smart Server Is Running On ${port}`);
+});
