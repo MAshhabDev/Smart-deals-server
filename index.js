@@ -1,9 +1,20 @@
 const express = require('express');
 const app = express();
 require('dotenv').config();
+var jwt = require('jsonwebtoken');
+
 const port = process.env.PORT || 5000;
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./smart-deals-firebase-adminsdk.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
 
 // Middleware
 app.use(cors());
@@ -14,7 +25,7 @@ const logger = (req, res, next) => {
     next();
 }
 // For cheacking authorization
-const verifyFBToken = (req, res, next) => {
+const verifyFBToken = async (req, res, next) => {
     console.log("Verify Middle Ware", req.headers.authorization);
 
     if (!req.headers.authorization) {
@@ -25,12 +36,29 @@ const verifyFBToken = (req, res, next) => {
     const token = req.headers.authorization.split(' ')[1];
     if (!token) {
         // don't allow
-        return res.status(401).send(message, "Unauthorized");
+        return res.status(401).send({ message: "Unauthorized" });
 
     }
     // verify token
+    try {
+        const userToken = await admin.auth().verifyIdToken(token);
 
-    next();
+        console.log("After Token Validation", userToken)
+
+        // email ta ber kore nilam
+        req.token_email = userToken.email;
+
+
+        // jodi validate hoi taile next kore dibo
+        next()
+    }
+
+    catch {
+        return res.status(401).send(message, "Unauthorized");
+
+    }
+
+
 }
 
 const uri = `mongodb://${process.env.DB_USER}:${process.env.DB_PASS}@ac-k50mwtj-shard-00-00.4j5c4iq.mongodb.net:27017,ac-k50mwtj-shard-00-01.4j5c4iq.mongodb.net:27017,ac-k50mwtj-shard-00-02.4j5c4iq.mongodb.net:27017/?ssl=true&replicaSet=atlas-xqdkdv-shard-0&authSource=admin&appName=Cluster0`;
@@ -51,6 +79,15 @@ async function run() {
         const productsCollection = db.collection('products');
         const bidsCollection = db.collection('bids');
         const usersCollection = db.collection('users');
+
+        // Jwt Api
+
+        app.post('/getToken', (req, res) => {
+            const loggedUser = req.body
+            const token = jwt.sign(loggedUser, process.env.JWT_SECRET, { expiresIn: '1h' })
+
+            res.send({ token: token })
+        })
 
         // Users API
         app.post("/users", async (req, res) => {
@@ -135,6 +172,9 @@ async function run() {
                 const query = {};
 
                 if (email) {
+                    if (email !== req.token_email) {
+                        return res.status(403).send({ message: 'forbidden access' })
+                    }
                     query.buyer_email = email;
                 }
 
@@ -146,7 +186,7 @@ async function run() {
             }
         });
 
-        app.get('/products/bids/:productId', async (req, res) => {
+        app.get('/products/bids/:productId', verifyFBToken, async (req, res) => {
             const productId = req.params.productId;
             const query = { product: productId };
 
