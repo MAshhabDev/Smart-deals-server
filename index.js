@@ -7,6 +7,7 @@ const port = process.env.PORT || 5000;
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
+// For create connection with admin
 const admin = require("firebase-admin");
 
 const serviceAccount = require("./smart-deals-firebase-adminsdk.json");
@@ -57,6 +58,30 @@ const verifyFBToken = async (req, res, next) => {
         return res.status(401).send(message, "Unauthorized");
 
     }
+
+
+    const verifyJWTToken = (req, res, next) => {
+        const authorization = req.headers.authorization;
+        if (!authorization) {
+            // don't allow
+            return res.status(401).send(message, "Unauthorized");
+        }
+        const token = authorization.split(' ')[1];
+        if (!token) {
+            // don't allow
+            return res.status(401).send({ message: "Unauthorized" });
+
+        }
+
+        jwt.verify(token, process.env.JNW_SECRET,(err,decoded)=>{
+            if(err){
+                           return res.status(403).send({ message: "Forbidden" });
+ 
+            }
+            next()
+        })
+    }
+}
 
 
 }
